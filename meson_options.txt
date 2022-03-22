@@ -1,1 +1,2 @@
 option('wl_globals', type: 'boolean', value: true, description: 'Builds wl-globals.c')
+option('wl_outputs', type: 'boolean', value: true, description: 'Builds wl-outputs.c')
