@@ -1,0 +1,1 @@
+option('wl_globals', type: 'boolean', value: true, description: 'Builds wl-globals.c')
