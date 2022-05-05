@@ -47,3 +47,7 @@ You'll need: `meson`, `ninja` and `wayland-client`, then (assuming you're not fa
 ## Wayland Globals
 This executable connects to the compositor and lists all supported globals.
 ![image](https://user-images.githubusercontent.com/46163903/159488429-ba15e570-3d6b-4ce2-87c3-c993470ad78c.png)
+
+## Wayland Outputs
+This executable lists all outputs detected. If the compositor supports `xdg_output` protocol, it shows aditional information.
+![image](https://user-images.githubusercontent.com/46163903/167037754-760c5cd3-c8cf-489d-b7b1-f6404ac1b53d.png)
