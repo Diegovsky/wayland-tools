@@ -1,5 +1,5 @@
 # Wayland Tools
-A collection of tools for inspecting and debugging wayland compositors. Currently, there is only one tool, wayland-globals, but feel free to open a PR or suggest a new one :)
+A collection of tools for inspecting and debugging wayland compositors. Currently, there are only two programs, but feel free to open a PR or suggest more :)
 
 # Table of Contents
 - [Wayland Tools](#wayland-tools)
@@ -8,6 +8,7 @@ A collection of tools for inspecting and debugging wayland compositors. Currentl
     + [How to uninstall](#how-to-uninstall)
     + [I am having trouble installing/building/uninstalling](#i-am-having-trouble)
   * [Wayland globals (wayland-globals.c)](#wayland-globals)
+  * [Wayland outputs (wayland-outputs.c)](#wayland-outputs)
 
 
 
