@@ -23,6 +23,7 @@ if get_option('wl_outputs')
   xdg_output_proto = protocols_code['xdg-output-unstable-v1']
   executable('wl-outputs',
     'wl-outputs.c',
+    'wl-utils.c',
     include_directories: 'protocols',
     link_with: xdg_output_proto,
     # Depends on xdg-output-unstable-v1
