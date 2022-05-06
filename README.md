@@ -51,4 +51,5 @@ This executable connects to the compositor and lists all supported globals.
 
 ## Wayland Outputs
 This executable lists all outputs detected. If the compositor supports `xdg_output` protocol, it shows aditional information.
-![image](https://user-images.githubusercontent.com/46163903/167037754-760c5cd3-c8cf-489d-b7b1-f6404ac1b53d.png)
+![image](https://user-images.githubusercontent.com/46163903/167226836-e3468d79-5e8c-4b81-8f8e-6245b7063b67.png)
+
