@@ -6,15 +6,20 @@
 #include <string.h>
 
 #include <wayland-client.h>
+#include <wayland-util.h>
 #include <xdg-output-unstable-v1-client.h>
 
-#include "wl-utils.h"
-
-/* Change this if you need numbers bigger than 65535 for sizes and resolutions. */
+/* Change this if you need numbers bigger than 65535 for sizes and resolutions.
+ * Keep in mind that increasing integer sizes will increase memory
+ * consumption a little. */
 typedef short metric_t;
 
-/* Keep in mind that increasing integer sizes will increase stack memory
- * consumption. */
+/* Stores extra information about an output */
+typedef struct {
+    const char *name, *description;
+    metric_t log_width, log_height, log_x, log_y;
+    struct zxdg_output_v1 *xdg_output;
+} xdg_output_info_t;
 
 /* Stores information about an output */
 typedef struct {
@@ -25,27 +30,16 @@ typedef struct {
         metric_t x, y, phys_width, phys_height;
         const char *model, *make;
     } geometry;
-    usize id;
+    struct wl_list link;
+    xdg_output_info_t *xinfo;
 } output_info_t;
 
-/* Stores extra information about an output */
 typedef struct {
-    const char *name, *description;
-    metric_t log_width, log_height, log_x, log_y;
-    struct zxdg_output_v1 *xdg_output;
-    usize id;
-} xdg_output_info_t;
-
-typedef struct {
-    usize output_number;
+    struct wl_list *output_link;
     struct zxdg_output_manager_v1 *manager;
 } state_t;
 
 #define state_has_xdg(state) ((state)->manager != NULL)
-
-static dynvec_t *xdg_outputs = NULL;
-
-static dynvec_t *outputs = NULL;
 
 static void noop() {}
 
@@ -53,10 +47,16 @@ static void noop() {}
 static metric_t metric_copy(metric_t num) { return num; }
 
 /* Basically `strdup`, but in C11. */
-static char* string_copy(const char* text) {
+static char *string_copy(const char *text) {
     size_t length = strlen(text);
+    // The extra byte is the null terminator
+    length += 1;
     char *new_text = malloc(length);
-    return strncpy(new_text, text, length);
+    strncpy(new_text, text, length);
+    // Since `strncpy` does not always NULL-terminate its output string, this is
+    // needed to guarantee a proper string.
+    new_text[length - 1] = '\0';
+    return new_text;
 }
 
 /* HELPER MACROS */
@@ -110,12 +110,11 @@ void output_info_set_geometry(void *data, struct wl_output *output, int x,
     // info->geometry.transform = transform;
 }
 
-void output_info_destroy(output_info_t** element) {
-    output_info_t* info = *element;
-    free( (char*) info->description);
-    free( (char*) info->name);
-    free( (char*) info->geometry.make);
-    free( (char*) info->geometry.model);
+void output_info_destroy(output_info_t *info) {
+    free((char *)info->description);
+    free((char *)info->name);
+    free((char *)info->geometry.make);
+    free((char *)info->geometry.model);
     wl_output_destroy(info->output);
     free(info);
 }
@@ -131,15 +130,15 @@ static struct wl_output_listener output_listener_impl = {
 
 /* XDG_OUTPUT CALLBACK STUFF */
 
-DEFINE_SETTER(xdg_output_info, zxdg_output_v1, const char*, name, string_copy)
-DEFINE_SETTER(xdg_output_info, zxdg_output_v1, const char *, description, string_copy)
+DEFINE_SETTER(xdg_output_info, zxdg_output_v1, const char *, name, string_copy)
+DEFINE_SETTER(xdg_output_info, zxdg_output_v1, const char *, description,
+              string_copy)
 DEFINE_SETTER2(xdg_output_info, zxdg_output_v1, int, log_width, log_height)
 DEFINE_SETTER2(xdg_output_info, zxdg_output_v1, int, log_x, log_y)
 
-void xdg_output_info_destroy(xdg_output_info_t** element) {
-    xdg_output_info_t* info = *element;
-    free( (char*) info->description);
-    free( (char*) info->name);
+void xdg_output_info_destroy(xdg_output_info_t *info) {
+    free((char *)info->description);
+    free((char *)info->name);
     zxdg_output_v1_destroy(info->xdg_output);
     free(info);
 }
@@ -163,13 +162,11 @@ void registry_receive(void *data, struct wl_registry *reg, uint32_t name,
     if (strstr(iface, wl_output_interface.name)) {
         struct wl_output *output =
             wl_registry_bind(reg, name, &wl_output_interface, ver);
-        output_info_t* info = calloc(1, sizeof(output_info_t));
-        info->id = state->output_number;
+        output_info_t *info = calloc(1, sizeof(output_info_t));
         info->output = output;
-        dynvec_insert(outputs, output_info_t*, info);
-        wl_output_add_listener(output, &output_listener_impl,
-                               info);
-        state->output_number += 1;
+        // wl_list_init(&info->link);
+        wl_list_insert(state->output_link, &info->link);
+        wl_output_add_listener(output, &output_listener_impl, info);
     } else if (strstr(iface, zxdg_output_manager_v1_interface.name)) {
         state->manager =
             wl_registry_bind(reg, name, &zxdg_output_manager_v1_interface, ver);
@@ -185,8 +182,10 @@ int main() {
     struct wl_display *display = wl_display_connect(NULL);
     struct wl_registry *reg = wl_display_get_registry(display);
     state_t state = {0};
-    outputs = dynvec_new(sizeof(output_info_t*));
-    xdg_outputs = dynvec_new(sizeof(xdg_output_info_t*));
+    // Initialize wl_list */
+    state.output_link = malloc(sizeof(struct wl_list));
+    wl_list_init(state.output_link);
+
     wl_registry_add_listener(reg, &reg_impl, &state);
     // Register globals and callbacks
     wl_display_roundtrip(display);
@@ -195,38 +194,36 @@ int main() {
 
     // Ask for xdg outputs if the compositor supports it
     if (state_has_xdg(&state)) {
-        for (output_info_t **element = dynvec_get(outputs, 0);
-             element != ((void *)0); element = dynvec_next(outputs, element)) {
-            output_info_t* info = *element;
+        output_info_t *info;
+        wl_list_for_each(info, state.output_link, link) {
             struct zxdg_output_v1 *xdg_output =
                 zxdg_output_manager_v1_get_xdg_output(state.manager,
                                                       info->output);
-            xdg_output_info_t* xinfo = calloc(1, sizeof(xdg_output_info_t));
-            xinfo->id = info->id;
+            xdg_output_info_t *xinfo = calloc(1, sizeof(xdg_output_info_t));
+            info->xinfo = xinfo;
             xinfo->xdg_output = xdg_output;
-            dynvec_insert(xdg_outputs, xdg_output_info_t*, xinfo);
             zxdg_output_v1_add_listener(xdg_output, &xdg_output_listener_impl,
                                         xinfo);
         }
         // Receive callbacks again
         wl_display_roundtrip(display);
     }
-    dynvec_foreach(outputs, output_info_t*, element) {
-        output_info_t info = **element;
+    output_info_t *info;
+    wl_list_for_each(info, state.output_link, link) {
         printf("Name: %s\n"
                "Description: %s\n"
                "Scale: %d\n",
-               info.name, info.description, info.scale);
+               info->name, info->description, info->scale);
 
         if (state_has_xdg(&state)) {
-            xdg_output_info_t xinfo = **(xdg_output_info_t**) dynvec_get(xdg_outputs, info.id);
+            xdg_output_info_t *xinfo = info->xinfo;
             printf("XDG Information:\n"
                    "\tName: %s\n"
                    "\tDescription: %s\n"
                    "\tLogical Size: (%d, %d)\n"
                    "\tLogical Position: (%d, %d)\n",
-                   xinfo.name, xinfo.description, xinfo.log_width,
-                   xinfo.log_height, xinfo.log_x, xinfo.log_y);
+                   xinfo->name, xinfo->description, xinfo->log_width,
+                   xinfo->log_height, xinfo->log_x, xinfo->log_y);
         }
 
         printf("Geometry:\n"
@@ -234,14 +231,30 @@ int main() {
                "\tSize: (%dmm, %dmm)\n"
                "\tModel: %s\n"
                "\tMaker: %s\n",
-               info.geometry.x, info.geometry.y, info.geometry.phys_width,
-               info.geometry.phys_height, info.geometry.model,
-               info.geometry.make);
+               info->geometry.x, info->geometry.y, info->geometry.phys_width,
+               info->geometry.phys_height, info->geometry.model,
+               info->geometry.make);
         puts("\n");
     }
-    dynvec_free(outputs, (dynvec_free_callback_t) output_info_destroy);
-    dynvec_free(xdg_outputs, (dynvec_free_callback_t) xdg_output_info_destroy);
-    // Acknowledge `delete_id` and other callbacks.
+    size_t outputs_number = wl_list_length(state.output_link);
+    printf("Number of Ouputs: %zu\n", outputs_number);
+
+    // Free up resources
+    output_info_t *tmp;
+    wl_list_for_each_safe(info, tmp, state.output_link, link) {
+        xdg_output_info_destroy(info->xinfo);
+        wl_list_remove(&info->link);
+        output_info_destroy(info);
+    }
+    free(state.output_link);
+
+    if (state.manager != NULL) {
+        zxdg_output_manager_v1_destroy(state.manager);
+    }
+    wl_registry_destroy(reg);
+    // Acknowledge `delete_id` and other callbacks
     wl_display_roundtrip(display);
+    // Not needed, but it's polite to.
+    wl_display_disconnect(display);
     return 0;
 }
